@@ -28,6 +28,7 @@ public class SistemaVentas {
             System.out.println("6. Listar clientes");
             System.out.println("7. Registrar venta");
             System.out.println("8. Listar ventas");
+            System.out.println("9. Ver historial de una venta");
             System.out.println("0. Salir");
             System.out.print("Selecciona una opción: ");
             opcion = Integer.parseInt(sc.nextLine());
@@ -56,6 +57,9 @@ public class SistemaVentas {
                     break;
                 case 8:
                     listarVentas();
+                    break;
+                case 9:
+                    verHistorialVenta();
                     break;
                 case 0:
                     System.out.println("Saliendo del sistema...");
@@ -241,6 +245,22 @@ public class SistemaVentas {
             System.out.println(v.getIdVenta() + " | Total: Q" + v.getTotal()
                     + " | Estado: " + v.getEstadoVenta());
         }
+    }
+
+    static void verHistorialVenta() {
+        if (ventas.isEmpty()) {
+            System.out.println("No hay ventas registradas.");
+            return;
+        }
+        System.out.print("ID de la venta: ");
+        String id = sc.nextLine();
+        for (Venta v : ventas) {
+            if (v.getIdVenta().equals(id)) {
+                v.verHistorial();
+                return;
+            }
+        }
+        System.out.println("Venta no encontrada.");
     }
 
     static Producto buscarProducto(String id) {

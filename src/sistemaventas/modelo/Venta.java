@@ -13,6 +13,7 @@ public class Venta {
     private Vendedor vendedor;
     private Cliente cliente;
     private ArrayList<Producto> productos;
+    private ArrayList<SeguimientoVenta> historial;
     private Factura factura;
 
     public Venta(String idVenta, String usuarioEmision, MetodoPago metodoPago,
@@ -24,8 +25,9 @@ public class Venta {
         this.vendedor = vendedor;
         this.cliente = cliente;
         this.productos = new ArrayList<>();
+        this.historial = new ArrayList<>();
         this.total = 0;
-        this.estadoVenta = EstadoVenta.PENDIENTE;
+        cambiarEstado(EstadoVenta.PENDIENTE, "Venta creada");
     }
 
     public String getIdVenta() {
@@ -42,6 +44,10 @@ public class Venta {
 
     public Factura getFactura() {
         return factura;
+    }
+
+    public ArrayList<SeguimientoVenta> getHistorial() {
+        return historial;
     }
 
     public void agregarProducto(Producto p) {
@@ -61,14 +67,20 @@ public class Venta {
         }
     }
 
+    public void cambiarEstado(EstadoVenta nuevoEstado, String comentario) {
+        this.estadoVenta = nuevoEstado;
+        String idSeg = "S" + (historial.size() + 1);
+        historial.add(new SeguimientoVenta(idSeg, nuevoEstado, comentario));
+    }
+
     public void registrarVenta() {
-        estadoVenta = EstadoVenta.EN_PROCESO;
+        cambiarEstado(EstadoVenta.EN_PROCESO, "Venta confirmada por el vendedor");
         vendedor.registrarVenta();
         System.out.println("Venta " + idVenta + " registrada por " + vendedor.getNombre());
     }
 
     public void cancelarVenta() {
-        estadoVenta = EstadoVenta.CANCELADA;
+        cambiarEstado(EstadoVenta.CANCELADA, "Venta cancelada");
         System.out.println("Venta " + idVenta + " cancelada.");
     }
 
@@ -81,6 +93,17 @@ public class Venta {
             contador++;
         }
         factura.emitirFactura();
-        estadoVenta = EstadoVenta.FACTURADA;
+        cambiarEstado(EstadoVenta.FACTURADA, "Factura " + idFactura + " emitida");
+    }
+
+    public void marcarEntregada() {
+        cambiarEstado(EstadoVenta.ENTREGADA, "Pedido entregado al cliente");
+    }
+
+    public void verHistorial() {
+        System.out.println("--- Historial de la venta " + idVenta + " ---");
+        for (SeguimientoVenta s : historial) {
+            System.out.println(s.toString());
+        }
     }
 }
