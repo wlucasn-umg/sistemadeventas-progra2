@@ -8,14 +8,14 @@ public class Venta {
     private Date fechaVenta;
     private String usuarioEmision;
     private double total;
-    private String metodoPago;
-    private String estadoVenta;
-    private Vendedor vendedor;             // asociación: Vendedor 1 -- 0..* Venta
-    private Cliente cliente;               // asociación: Cliente 1 -- 0..* Venta
-    private ArrayList<Producto> productos; // productos que se están vendiendo en esta venta
-    private Factura factura;               // asociación 1-1: Venta genera una Factura
+    private MetodoPago metodoPago;
+    private EstadoVenta estadoVenta;
+    private Vendedor vendedor;
+    private Cliente cliente;
+    private ArrayList<Producto> productos;
+    private Factura factura;
 
-    public Venta(String idVenta, String usuarioEmision, String metodoPago,
+    public Venta(String idVenta, String usuarioEmision, MetodoPago metodoPago,
                  Vendedor vendedor, Cliente cliente) {
         this.idVenta = idVenta;
         this.fechaVenta = new Date();
@@ -25,7 +25,7 @@ public class Venta {
         this.cliente = cliente;
         this.productos = new ArrayList<>();
         this.total = 0;
-        this.estadoVenta = "En proceso";
+        this.estadoVenta = EstadoVenta.PENDIENTE;
     }
 
     public String getIdVenta() {
@@ -36,7 +36,7 @@ public class Venta {
         return total;
     }
 
-    public String getEstadoVenta() {
+    public EstadoVenta getEstadoVenta() {
         return estadoVenta;
     }
 
@@ -62,13 +62,13 @@ public class Venta {
     }
 
     public void registrarVenta() {
-        estadoVenta = "Registrada";
+        estadoVenta = EstadoVenta.EN_PROCESO;
         vendedor.registrarVenta();
         System.out.println("Venta " + idVenta + " registrada por " + vendedor.getNombre());
     }
 
     public void cancelarVenta() {
-        estadoVenta = "Cancelada";
+        estadoVenta = EstadoVenta.CANCELADA;
         System.out.println("Venta " + idVenta + " cancelada.");
     }
 
@@ -81,5 +81,6 @@ public class Venta {
             contador++;
         }
         factura.emitirFactura();
+        estadoVenta = EstadoVenta.FACTURADA;
     }
 }

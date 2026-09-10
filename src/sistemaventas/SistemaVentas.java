@@ -180,8 +180,21 @@ public class SistemaVentas {
         int idxC = Integer.parseInt(sc.nextLine());
         Cliente clienteSel = clientes.get(idxC);
 
-        System.out.print("Método de pago (Efectivo/Tarjeta/Transferencia): ");
-        String metodoPago = sc.nextLine();
+        System.out.println("Método de pago:");
+        System.out.println("1. Efectivo");
+        System.out.println("2. Tarjeta");
+        System.out.println("3. Transferencia");
+        System.out.print("Selecciona una opción: ");
+        int opcionPago = Integer.parseInt(sc.nextLine());
+        MetodoPago metodoPago;
+        switch (opcionPago) {
+            case 1: metodoPago = MetodoPago.EFECTIVO; break;
+            case 2: metodoPago = MetodoPago.TARJETA; break;
+            case 3: metodoPago = MetodoPago.TRANSFERENCIA; break;
+            default:
+                System.out.println("Opción inválida, se asignará Efectivo por defecto.");
+                metodoPago = MetodoPago.EFECTIVO;
+        }
 
         Venta venta = new Venta(idVenta, vendedorSel.getUsuario().getNombreUsuario(),
                 metodoPago, vendedorSel, clienteSel);
