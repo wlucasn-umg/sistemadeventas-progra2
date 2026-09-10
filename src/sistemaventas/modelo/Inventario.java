@@ -6,7 +6,7 @@ import java.util.Date;
 public class Inventario {
     private String idInventario;
     private Date fechaActualizacion;
-    private ArrayList<Producto> productos;   // agregación: Inventario "tiene" Productos, pero no los crea ni los destruye
+    private ArrayList<Producto> productos;
 
     public Inventario(String idInventario) {
         this.idInventario = idInventario;
@@ -20,6 +20,10 @@ public class Inventario {
 
     public Date getFechaActualizacion() {
         return fechaActualizacion;
+    }
+
+    public ArrayList<Producto> getProductos() {
+        return productos;
     }
 
     public void agregarProducto(Producto p) {
