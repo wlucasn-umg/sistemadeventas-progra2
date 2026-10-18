@@ -1,5 +1,6 @@
 package sistemaventas;
 
+import sistemaventas.datos.BaseDatosMemoria;
 import sistemaventas.modelo.*;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -9,12 +10,26 @@ import java.util.Scanner;
 public class SistemaVentas {
 
     static Scanner sc = new Scanner(System.in, StandardCharsets.UTF_8);
-    static Inventario inventario = new Inventario("INV001");
-    static ArrayList<Vendedor> vendedores = new ArrayList<>();
-    static ArrayList<Cliente> clientes = new ArrayList<>();
-    static ArrayList<Venta> ventas = new ArrayList<>();
+
+    // Las listas viven en el Singleton; estas variables apuntan a las mismas listas
+    static BaseDatosMemoria db = BaseDatosMemoria.getInstancia();
+    public static Inventario inventario = db.getInventario();
+    public static ArrayList<Vendedor> vendedores = db.getVendedores();
+    public static ArrayList<Cliente> clientes = db.getClientes();
+    public static ArrayList<Venta> ventas = db.getVentas();
 
     public static void main(String[] args) {
+        try {
+            for (javax.swing.UIManager.LookAndFeelInfo info : javax.swing.UIManager.getInstalledLookAndFeels()) {
+                if ("Nimbus".equals(info.getName())) {
+                    javax.swing.UIManager.setLookAndFeel(info.getClassName());
+                    break;
+                }
+            }
+        } catch (Exception ex) {
+            System.out.println("No se pudo aplicar Nimbus, se usará el tema por defecto.");
+        }
+
         System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
 
         int opcion;
@@ -29,6 +44,10 @@ public class SistemaVentas {
             System.out.println("7. Registrar venta");
             System.out.println("8. Listar ventas");
             System.out.println("9. Ver historial de una venta");
+            System.out.println("10. Buscar producto por código");
+            System.out.println("11. Buscar cliente por NIT");
+            System.out.println("12. Buscar vendedor por ID");
+            System.out.println("13. Abrir ventana principal (menú MDI)");
             System.out.println("0. Salir");
             System.out.print("Selecciona una opción: ");
             opcion = Integer.parseInt(sc.nextLine());
@@ -60,6 +79,20 @@ public class SistemaVentas {
                     break;
                 case 9:
                     verHistorialVenta();
+                    break;
+                case 10:
+                    buscarProductoMenu();
+                    break;
+                case 11:
+                    buscarClientePorNit();
+                    break;
+                case 12:
+                    buscarVendedorPorId();
+                    break;
+                case 13:
+                    javax.swing.SwingUtilities.invokeLater(() -> {
+                        new sistemaventas.vista.FrmPrincipal().setVisible(true);
+                    });
                     break;
                 case 0:
                     System.out.println("Saliendo del sistema...");
@@ -261,6 +294,46 @@ public class SistemaVentas {
             }
         }
         System.out.println("Venta no encontrada.");
+    }
+
+    static void buscarProductoMenu() {
+        System.out.print("Código del producto: ");
+        String id = sc.nextLine();
+        Producto p = buscarProducto(id);
+        if (p == null) {
+            System.out.println("Producto no encontrado.");
+        } else {
+            System.out.println(p.getIdProducto() + " - " + p.getNombreProducto()
+                    + " | Categoría: " + p.getCategoriaProducto()
+                    + " | Precio: Q" + p.getPrecio()
+                    + " | Stock: " + p.getStock());
+        }
+    }
+
+    static void buscarClientePorNit() {
+        System.out.print("NIT del cliente: ");
+        String nit = sc.nextLine();
+        for (Cliente c : clientes) {
+            if (c.getNit().equals(nit)) {
+                System.out.println(c.getNit() + " - " + c.getNombre()
+                        + " | Dirección: " + c.getDireccionEnvio());
+                return;
+            }
+        }
+        System.out.println("Cliente no encontrado.");
+    }
+
+    static void buscarVendedorPorId() {
+        System.out.print("ID del vendedor: ");
+        String id = sc.nextLine();
+        for (Vendedor v : vendedores) {
+            if (v.getIdVendedor().equals(id)) {
+                System.out.println(v.getIdVendedor() + " - " + v.getNombre()
+                        + " | Puesto: " + v.getPuesto());
+                return;
+            }
+        }
+        System.out.println("Vendedor no encontrado.");
     }
 
     static Producto buscarProducto(String id) {
