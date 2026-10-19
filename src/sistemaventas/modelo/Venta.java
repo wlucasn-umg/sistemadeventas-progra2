@@ -15,6 +15,7 @@ public class Venta {
     private ArrayList<Producto> productos;
     private ArrayList<SeguimientoVenta> historial;
     private Factura factura;
+    private boolean stockDescontado = false;
 
     public Venta(String idVenta, String usuarioEmision, MetodoPago metodoPago,
                  Vendedor vendedor, Cliente cliente) {
@@ -34,12 +35,36 @@ public class Venta {
         return idVenta;
     }
 
+    public Date getFechaVenta() {
+        return fechaVenta;
+    }
+
+    public String getUsuarioEmision() {
+        return usuarioEmision;
+    }
+
     public double getTotal() {
         return total;
     }
 
+    public MetodoPago getMetodoPago() {
+        return metodoPago;
+    }
+
     public EstadoVenta getEstadoVenta() {
         return estadoVenta;
+    }
+
+    public Vendedor getVendedor() {
+        return vendedor;
+    }
+
+    public Cliente getCliente() {
+        return cliente;
+    }
+
+    public ArrayList<Producto> getProductos() {
+        return productos;
     }
 
     public Factura getFactura() {
@@ -50,9 +75,27 @@ public class Venta {
         return historial;
     }
 
-    public void agregarProducto(Producto p) {
+    // Cuántas unidades de ese producto lleva esta venta
+    public int cantidadEnVenta(Producto p) {
+        int n = 0;
+        for (Producto x : productos) {
+            if (x == p) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    // Devuelve false si no alcanza el stock (y no agrega nada)
+    public boolean agregarProducto(Producto p) {
+        if (cantidadEnVenta(p) + 1 > p.getStock()) {
+            System.out.println("Stock insuficiente de " + p.getNombreProducto()
+                    + " (disponible: " + p.getStock() + ").");
+            return false;
+        }
         productos.add(p);
         calcularTotal();
+        return true;
     }
 
     public void eliminarProducto(Producto p) {
@@ -73,6 +116,15 @@ public class Venta {
         historial.add(new SeguimientoVenta(idSeg, nuevoEstado, comentario));
     }
 
+    // Reglas del flujo: se entrega solo lo facturado; se cancela todo lo que no esté entregado o cancelado
+    public boolean puedeEntregarse() {
+        return estadoVenta == EstadoVenta.FACTURADA;
+    }
+
+    public boolean puedeCancelarse() {
+        return estadoVenta != EstadoVenta.ENTREGADA && estadoVenta != EstadoVenta.CANCELADA;
+    }
+
     public void registrarVenta() {
         cambiarEstado(EstadoVenta.EN_PROCESO, "Venta confirmada por el vendedor");
         vendedor.registrarVenta();
@@ -80,23 +132,68 @@ public class Venta {
     }
 
     public void cancelarVenta() {
-        cambiarEstado(EstadoVenta.CANCELADA, "Venta cancelada");
+        if (!puedeCancelarse()) {
+            System.out.println("La venta " + idVenta + " no se puede cancelar (estado: " + estadoVenta + ").");
+            return;
+        }
+        String comentario = "Venta cancelada";
+        if (stockDescontado) {
+            for (Producto p : productos) {
+                p.aumentarStock(1);
+            }
+            stockDescontado = false;
+            comentario = "Venta cancelada (stock devuelto al inventario)";
+        }
+        cambiarEstado(EstadoVenta.CANCELADA, comentario);
         System.out.println("Venta " + idVenta + " cancelada.");
     }
 
+    // Emite la factura y descuenta el stock. Si no alcanza el stock, no factura y deja factura = null
     public void generarFactura(String idFactura, String nombreEmpresa) {
-        factura = new Factura(idFactura, nombreEmpresa);
+        if (factura != null) {
+            System.out.println("La venta " + idVenta + " ya tiene factura.");
+            return;
+        }
+        if (estadoVenta == EstadoVenta.CANCELADA) {
+            System.out.println("La venta " + idVenta + " está cancelada, no se puede facturar.");
+            return;
+        }
+
+        // Revisa el stock por producto (por si cambió desde que se agregaron)
+        ArrayList<Producto> revisados = new ArrayList<>();
+        for (Producto p : productos) {
+            if (revisados.contains(p)) {
+                continue;
+            }
+            revisados.add(p);
+            if (cantidadEnVenta(p) > p.getStock()) {
+                System.out.println("Stock insuficiente de " + p.getNombreProducto()
+                        + ": no se puede facturar.");
+                return;
+            }
+        }
+
+        Factura nueva = new Factura(idFactura, nombreEmpresa);
         int contador = 1;
         for (Producto p : productos) {
-            DetalleFactura detalle = new DetalleFactura("D" + contador, 1, p);
-            factura.agregarDetalle(detalle);
+            nueva.agregarDetalle(new DetalleFactura("D" + contador, 1, p));
             contador++;
         }
+        factura = nueva;
         factura.emitirFactura();
+
+        for (Producto p : productos) {
+            p.disminuirStock(1);
+        }
+        stockDescontado = true;
         cambiarEstado(EstadoVenta.FACTURADA, "Factura " + idFactura + " emitida");
     }
 
     public void marcarEntregada() {
+        if (!puedeEntregarse()) {
+            System.out.println("La venta " + idVenta + " no se puede entregar (estado: " + estadoVenta + ").");
+            return;
+        }
         cambiarEstado(EstadoVenta.ENTREGADA, "Pedido entregado al cliente");
     }
 

@@ -34,11 +34,12 @@ public class FrmPrincipal extends JFrame {
 
         JMenu mnuCatalogos = new JMenu("Catálogos");
         mnuCatalogos.add(crearItem("Clientes", () -> abrirFormulario(new FrmClientes())));
-        mnuCatalogos.add(crearItem("Vendedores", () -> enConstruccion("Vendedores")));
-        mnuCatalogos.add(crearItem("Productos", () -> enConstruccion("Productos")));
+        mnuCatalogos.add(crearItem("Vendedores", () -> abrirFormulario(new FrmVendedores())));
+        mnuCatalogos.add(crearItem("Productos", () -> abrirFormulario(new FrmProductos())));
 
         JMenu mnuVentas = new JMenu("Ventas");
         mnuVentas.add(crearItem("Facturación", () -> abrirFormulario(new FrmFacturacion())));
+        mnuVentas.add(crearItem("Consulta de ventas", () -> abrirFormulario(new FrmVentas())));
 
         JMenu mnuSistema = new JMenu("Sistema");
         mnuSistema.add(crearItem("Salir", this::salir));
@@ -53,12 +54,6 @@ public class FrmPrincipal extends JFrame {
         JMenuItem item = new JMenuItem(texto);
         item.addActionListener(e -> accion.run());
         return item;
-    }
-
-    private void enConstruccion(String nombre) {
-        JOptionPane.showMessageDialog(this,
-                nombre + " todavía está en construcción.",
-                "Aviso", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void salir() {

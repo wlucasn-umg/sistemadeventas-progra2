@@ -20,6 +20,10 @@ public class Producto {
         return idProducto;
     }
 
+    public void setIdProducto(String idProducto) {
+        this.idProducto = idProducto;
+    }
+
     public String getNombreProducto() {
         return nombreProducto;
     }
@@ -48,6 +52,10 @@ public class Producto {
         return stock;
     }
 
+    public void setStock(int stock) {
+        this.stock = stock;
+    }
+
     public void registrarProducto() {
         System.out.println("Producto registrado: " + nombreProducto);
     }
@@ -62,13 +70,19 @@ public class Producto {
         return stock >= cantidadSolicitada;
     }
 
-    // Estos dos no vienen en Producto según el diagrama,
-    // pero los necesitamos internamente para que Inventario pueda mover el stock
-    void aumentarStock(int cantidad) {
-        this.stock += cantidad;
+    public void aumentarStock(int cantidad) {
+        if (cantidad > 0) {
+            this.stock += cantidad;
+        }
     }
 
-    void disminuirStock(int cantidad) {
-        this.stock -= cantidad;
+    public void disminuirStock(int cantidad) {
+        if (cantidad > stock) {
+            throw new IllegalArgumentException("Stock insuficiente de " + nombreProducto
+                    + ": hay " + stock + " y se piden " + cantidad);
+        }
+        if (cantidad > 0) {
+            this.stock -= cantidad;
+        }
     }
 }
