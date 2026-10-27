@@ -3,6 +3,7 @@ package sistemaventas.vista;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -20,15 +21,18 @@ import javax.swing.event.InternalFrameAdapter;
 import javax.swing.event.InternalFrameEvent;
 import javax.swing.table.DefaultTableModel;
 import sistemaventas.datos.BaseDatosMemoria;
+import sistemaventas.datos.ProductoDAO;
 import sistemaventas.modelo.Producto;
 import sistemaventas.modelo.Venta;
 
 /**
  * Catálogo de productos como ventana interna del MDI.
- * Altas, cambios, bajas y búsqueda sobre el inventario de BaseDatosMemoria.
+ * Altas, cambios, bajas y búsqueda sobre la base de datos MySQL (ProductoDAO).
  */
 public class FrmProductos extends JInternalFrame {
 
+    private final ProductoDAO dao = new ProductoDAO();
+    // Las ventas aún viven en memoria; se usan para no borrar productos ya vendidos
     private final BaseDatosMemoria db = BaseDatosMemoria.getInstancia();
     // Productos que se ven ahora en la tabla (misma posición que las filas)
     private final List<Producto> mostrados = new ArrayList<>();
@@ -54,7 +58,7 @@ public class FrmProductos extends JInternalFrame {
         setSize(800, 460);
         construirPantalla();
         cargarTabla("");
-        // Al volver a esta ventana se refresca la tabla (el stock cambia al facturar)
+        // Al volver a esta ventana se refresca la tabla
         addInternalFrameListener(new InternalFrameAdapter() {
             @Override
             public void internalFrameActivated(InternalFrameEvent e) {
@@ -96,18 +100,16 @@ public class FrmProductos extends JInternalFrame {
     private void cargarTabla(String filtro) {
         modeloTabla.setRowCount(0);
         mostrados.clear();
-        String f = filtro.toLowerCase();
-        for (Producto p : db.getInventario().getProductos()) {
-            boolean coincide = f.isEmpty()
-                    || p.getIdProducto().toLowerCase().contains(f)
-                    || p.getNombreProducto().toLowerCase().contains(f)
-                    || p.getCategoriaProducto().toLowerCase().contains(f);
-            if (coincide) {
+        try {
+            List<Producto> lista = filtro.isEmpty() ? dao.listar() : dao.buscar(filtro);
+            for (Producto p : lista) {
                 mostrados.add(p);
                 modeloTabla.addRow(new Object[]{
                     p.getIdProducto(), p.getNombreProducto(), p.getCategoriaProducto(),
                     String.format(Locale.US, "%.2f", p.getPrecio()), p.getStock()});
             }
+        } catch (SQLException e) {
+            errorBD(e);
         }
     }
 
@@ -120,14 +122,19 @@ public class FrmProductos extends JInternalFrame {
 
         while (pedirDatos("Nuevo producto", codigo, nombre, categoria, precio, stock)) {
             String error = validar(codigo.getText().trim(), nombre.getText().trim(),
-                    precio.getText(), stock.getText(), null);
+                    categoria.getText().trim(), precio.getText(), stock.getText(), true);
             if (error != null) {
                 aviso(error);
                 continue; // vuelve a mostrar el formulario con lo que ya escribiste
             }
-            db.getInventario().agregarProducto(new Producto(
-                    codigo.getText().trim(), nombre.getText().trim(), categoria.getText().trim(),
-                    leerPrecio(precio.getText()), leerStock(stock.getText())));
+            try {
+                dao.insertar(new Producto(
+                        codigo.getText().trim(), nombre.getText().trim(), categoria.getText().trim(),
+                        leerPrecio(precio.getText()), leerStock(stock.getText())));
+            } catch (SQLException e) {
+                errorBD(e);
+                return;
+            }
             cargarTabla(txtBuscar.getText().trim());
             return;
         }
@@ -139,6 +146,7 @@ public class FrmProductos extends JInternalFrame {
             return;
         }
         JTextField codigo = new JTextField(p.getIdProducto(), 20);
+        codigo.setEditable(false); // el código identifica al producto en la base de datos
         JTextField nombre = new JTextField(p.getNombreProducto(), 20);
         JTextField categoria = new JTextField(p.getCategoriaProducto(), 20);
         JTextField precio = new JTextField(String.format(Locale.US, "%.2f", p.getPrecio()), 20);
@@ -146,16 +154,19 @@ public class FrmProductos extends JInternalFrame {
 
         while (pedirDatos("Editar producto", codigo, nombre, categoria, precio, stock)) {
             String error = validar(codigo.getText().trim(), nombre.getText().trim(),
-                    precio.getText(), stock.getText(), p);
+                    categoria.getText().trim(), precio.getText(), stock.getText(), false);
             if (error != null) {
                 aviso(error);
                 continue;
             }
-            p.setIdProducto(codigo.getText().trim());
-            p.setNombreProducto(nombre.getText().trim());
-            p.setCategoriaProducto(categoria.getText().trim());
-            p.setPrecio(leerPrecio(precio.getText()));
-            p.setStock(leerStock(stock.getText()));
+            try {
+                dao.actualizar(new Producto(
+                        p.getIdProducto(), nombre.getText().trim(), categoria.getText().trim(),
+                        leerPrecio(precio.getText()), leerStock(stock.getText())));
+            } catch (SQLException e) {
+                errorBD(e);
+                return;
+            }
             cargarTabla(txtBuscar.getText().trim());
             return;
         }
@@ -166,23 +177,30 @@ public class FrmProductos extends JInternalFrame {
         if (p == null) {
             return;
         }
-        int ventas = 0;
-        for (Venta v : db.getVentas()) {
-            if (v.getProductos().contains(p)) {
-                ventas++;
+        try {
+            int ventas = 0;
+            for (Venta v : db.getVentas()) {
+                for (Producto vp : v.getProductos()) {
+                    if (vp.getIdProducto().equalsIgnoreCase(p.getIdProducto())) {
+                        ventas++;
+                        break;
+                    }
+                }
             }
-        }
-        if (ventas > 0) {
-            aviso("No se puede eliminar " + p.getNombreProducto() + ": aparece en "
-                    + ventas + " venta(s).");
-            return;
-        }
-        int respuesta = JOptionPane.showConfirmDialog(this,
-                "¿Eliminar el producto " + p.getNombreProducto() + " (código " + p.getIdProducto() + ")?",
-                "Eliminar producto", JOptionPane.YES_NO_OPTION);
-        if (respuesta == JOptionPane.YES_OPTION) {
-            db.getInventario().getProductos().remove(p);
-            cargarTabla(txtBuscar.getText().trim());
+            if (ventas > 0 || dao.tieneFacturas(p.getIdProducto())) {
+                aviso("No se puede eliminar " + p.getNombreProducto()
+                        + ": ya aparece en ventas o facturas.");
+                return;
+            }
+            int respuesta = JOptionPane.showConfirmDialog(this,
+                    "¿Eliminar el producto " + p.getNombreProducto() + " (código " + p.getIdProducto() + ")?",
+                    "Eliminar producto", JOptionPane.YES_NO_OPTION);
+            if (respuesta == JOptionPane.YES_OPTION) {
+                dao.eliminar(p.getIdProducto());
+                cargarTabla(txtBuscar.getText().trim());
+            }
+        } catch (SQLException e) {
+            errorBD(e);
         }
     }
 
@@ -203,12 +221,16 @@ public class FrmProductos extends JInternalFrame {
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION;
     }
 
-    private String validar(String codigo, String nombre, String precioTxt, String stockTxt, Producto actual) {
+    private String validar(String codigo, String nombre, String categoria,
+            String precioTxt, String stockTxt, boolean esNuevo) {
         if (codigo.isEmpty()) {
             return "El código es obligatorio.";
         }
         if (nombre.isEmpty()) {
             return "El nombre es obligatorio.";
+        }
+        if (categoria.isEmpty()) {
+            return "La categoría es obligatoria.";
         }
         Double precio = leerPrecio(precioTxt);
         if (precio == null || precio.isNaN() || precio.isInfinite() || precio < 0) {
@@ -218,9 +240,13 @@ public class FrmProductos extends JInternalFrame {
         if (stock == null || stock < 0) {
             return "El stock debe ser un número entero mayor o igual a 0.";
         }
-        for (Producto otro : db.getInventario().getProductos()) {
-            if (otro != actual && otro.getIdProducto().equalsIgnoreCase(codigo)) {
-                return "Ya existe un producto con ese código.";
+        if (esNuevo) {
+            try {
+                if (dao.existeCodigo(codigo)) {
+                    return "Ya existe un producto con ese código.";
+                }
+            } catch (SQLException e) {
+                return "No se pudo verificar el código: " + e.getMessage();
             }
         }
         return null;
@@ -253,5 +279,11 @@ public class FrmProductos extends JInternalFrame {
 
     private void aviso(String mensaje) {
         JOptionPane.showMessageDialog(this, mensaje, "Aviso", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void errorBD(SQLException e) {
+        JOptionPane.showMessageDialog(this,
+                "Error con la base de datos:\n" + e.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
     }
 }
