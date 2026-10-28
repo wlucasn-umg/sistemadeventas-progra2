@@ -15,6 +15,7 @@ public class Venta {
     private ArrayList<Producto> productos;
     private ArrayList<SeguimientoVenta> historial;
     private Factura factura;
+    private Despacho despacho;
     private boolean stockDescontado = false;
 
     public Venta(String idVenta, String usuarioEmision, MetodoPago metodoPago,
@@ -91,6 +92,14 @@ public class Venta {
         this.factura = factura;
     }
 
+    public Despacho getDespacho() {
+        return despacho;
+    }
+
+    public void setDespacho(Despacho despacho) {
+        this.despacho = despacho;
+    }
+
     public boolean isStockDescontado() {
         return stockDescontado;
     }
@@ -149,6 +158,87 @@ public class Venta {
         return estadoVenta != EstadoVenta.ENTREGADA && estadoVenta != EstadoVenta.CANCELADA;
     }
 
+    // ---------- Flujo: orden de venta -> despacho -> salida de inventario -> factura ----------
+
+    public boolean puedeConfirmarse() {
+        return estadoVenta == EstadoVenta.PENDIENTE && !productos.isEmpty();
+    }
+
+    public boolean puedeDespacharse() {
+        return estadoVenta == EstadoVenta.EN_PROCESO
+                && despacho != null && despacho.getEstado() == EstadoDespacho.PENDIENTE;
+    }
+
+    public boolean puedeFacturarse() {
+        return estadoVenta == EstadoVenta.DESPACHADA && factura == null;
+    }
+
+    // Confirma la orden de venta y genera su orden de despacho. No toca el inventario.
+    public boolean confirmarOrden() {
+        if (!puedeConfirmarse()) {
+            System.out.println("La orden " + idVenta + " no se puede confirmar (estado: "
+                    + estadoVenta + ", productos: " + productos.size() + ").");
+            return false;
+        }
+        cambiarEstado(EstadoVenta.EN_PROCESO, "Orden confirmada por el vendedor");
+        vendedor.registrarVenta();
+        despacho = new Despacho("DSP-" + idVenta);
+        return true;
+    }
+
+    // Confirma el despacho: aquí sale el inventario. Si no alcanza el stock, no hace nada.
+    public boolean confirmarDespacho() {
+        if (!puedeDespacharse()) {
+            System.out.println("La orden " + idVenta + " no se puede despachar (estado: " + estadoVenta + ").");
+            return false;
+        }
+        ArrayList<Producto> revisados = new ArrayList<>();
+        for (Producto p : productos) {
+            if (revisados.contains(p)) {
+                continue;
+            }
+            revisados.add(p);
+            if (cantidadEnVenta(p) > p.getStock()) {
+                System.out.println("Stock insuficiente de " + p.getNombreProducto()
+                        + ": no se puede confirmar el despacho.");
+                return false;
+            }
+        }
+        for (Producto p : productos) {
+            p.disminuirStock(1);
+        }
+        stockDescontado = true;
+        despacho.confirmar();
+        cambiarEstado(EstadoVenta.DESPACHADA, "Despacho " + despacho.getIdDespacho()
+                + " confirmado: salida de inventario");
+        return true;
+    }
+
+    // Emite la factura de una venta ya despachada (el inventario ya salió en el despacho)
+    public boolean facturar(String idFactura, String nombreEmpresa) {
+        if (!puedeFacturarse()) {
+            System.out.println("La venta " + idVenta + " no se puede facturar (estado: " + estadoVenta
+                    + "). Primero debe confirmarse el despacho.");
+            return false;
+        }
+        Factura nueva = new Factura(idFactura, nombreEmpresa);
+        ArrayList<Producto> vistos = new ArrayList<>();
+        int contador = 1;
+        for (Producto p : productos) {
+            if (vistos.contains(p)) {
+                continue;
+            }
+            vistos.add(p);
+            nueva.agregarDetalle(new DetalleFactura("D" + contador, cantidadEnVenta(p), p));
+            contador++;
+        }
+        factura = nueva;
+        factura.emitirFactura();
+        cambiarEstado(EstadoVenta.FACTURADA, "Factura " + idFactura + " emitida");
+        return true;
+    }
+
+    // Flujo anterior (consola): confirma la orden sin despacho
     public void registrarVenta() {
         cambiarEstado(EstadoVenta.EN_PROCESO, "Venta confirmada por el vendedor");
         vendedor.registrarVenta();
@@ -168,11 +258,15 @@ public class Venta {
             stockDescontado = false;
             comentario = "Venta cancelada (stock devuelto al inventario)";
         }
+        if (despacho != null && despacho.getEstado() == EstadoDespacho.PENDIENTE) {
+            despacho.anular();
+        }
         cambiarEstado(EstadoVenta.CANCELADA, comentario);
         System.out.println("Venta " + idVenta + " cancelada.");
     }
 
-    // Emite la factura y descuenta el stock. Si no alcanza el stock, no factura y deja factura = null
+    // Flujo anterior (consola): emite la factura y descuenta el stock en un solo paso.
+    // El flujo nuevo usa confirmarOrden() -> confirmarDespacho() -> facturar().
     public void generarFactura(String idFactura, String nombreEmpresa) {
         if (factura != null) {
             System.out.println("La venta " + idVenta + " ya tiene factura.");
