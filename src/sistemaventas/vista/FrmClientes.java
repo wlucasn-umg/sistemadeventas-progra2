@@ -19,20 +19,16 @@ import javax.swing.ListSelectionModel;
 import javax.swing.event.InternalFrameAdapter;
 import javax.swing.event.InternalFrameEvent;
 import javax.swing.table.DefaultTableModel;
-import sistemaventas.datos.BaseDatosMemoria;
 import sistemaventas.datos.ClienteDAO;
 import sistemaventas.modelo.Cliente;
-import sistemaventas.modelo.Venta;
 
 /**
  * Catálogo de clientes como ventana interna del MDI.
- * Altas, cambios, bajas y búsqueda sobre la base de datos MySQL (ClienteDAO).
+ * Altas, cambios, bajas y búsqueda sobre MySQL (ClienteDAO).
  */
 public class FrmClientes extends JInternalFrame {
 
     private final ClienteDAO dao = new ClienteDAO();
-    // Las ventas aún viven en memoria; se usan para no borrar clientes con ventas
-    private final BaseDatosMemoria db = BaseDatosMemoria.getInstancia();
     // Clientes que se ven ahora en la tabla (misma posición que las filas)
     private final List<Cliente> mostrados = new ArrayList<>();
 
@@ -100,14 +96,14 @@ public class FrmClientes extends JInternalFrame {
         modeloTabla.setRowCount(0);
         mostrados.clear();
         try {
-            List<Cliente> lista = filtro.isEmpty() ? dao.listar() : dao.buscar(filtro);
-            for (Cliente c : lista) {
+            List<Cliente> clientes = filtro.isEmpty() ? dao.listar() : dao.buscar(filtro);
+            for (Cliente c : clientes) {
                 mostrados.add(c);
                 modeloTabla.addRow(new Object[]{
                     c.getNit(), c.getNombre(), c.getTelefono(), c.getDireccionEnvio()});
             }
-        } catch (SQLException e) {
-            errorBD(e);
+        } catch (SQLException ex) {
+            errorBD("No se pudieron cargar los clientes.", ex);
         }
     }
 
@@ -118,20 +114,20 @@ public class FrmClientes extends JInternalFrame {
         JTextField direccion = new JTextField(20);
 
         while (pedirDatos("Nuevo cliente", nit, nombre, telefono, direccion)) {
-            String error = validar(nit.getText().trim(), nombre.getText().trim(), null);
-            if (error != null) {
-                aviso(error);
-                continue; // vuelve a mostrar el formulario con lo que ya escribiste
-            }
             try {
+                String error = validar(nit.getText().trim(), nombre.getText().trim(), null);
+                if (error != null) {
+                    aviso(error);
+                    continue; // vuelve a mostrar el formulario con lo que ya escribiste
+                }
                 dao.insertar(new Cliente(nombre.getText().trim(), telefono.getText().trim(),
                         nit.getText().trim(), direccion.getText().trim()));
-            } catch (SQLException e) {
-                errorBD(e);
+                cargarTabla(txtBuscar.getText().trim());
+                return;
+            } catch (SQLException ex) {
+                errorBD("No se pudo guardar el cliente.", ex);
                 return;
             }
-            cargarTabla(txtBuscar.getText().trim());
-            return;
         }
     }
 
@@ -147,21 +143,21 @@ public class FrmClientes extends JInternalFrame {
         JTextField direccion = new JTextField(c.getDireccionEnvio(), 20);
 
         while (pedirDatos("Editar cliente", nit, nombre, telefono, direccion)) {
-            String error = validar(nit.getText().trim(), nombre.getText().trim(), nitOriginal);
-            if (error != null) {
-                aviso(error);
-                continue;
-            }
             try {
+                String error = validar(nit.getText().trim(), nombre.getText().trim(), nitOriginal);
+                if (error != null) {
+                    aviso(error);
+                    continue;
+                }
                 dao.actualizar(nitOriginal, new Cliente(nombre.getText().trim(),
                         telefono.getText().trim(), nit.getText().trim(),
                         direccion.getText().trim()));
-            } catch (SQLException e) {
-                errorBD(e);
+                cargarTabla(txtBuscar.getText().trim());
+                return;
+            } catch (SQLException ex) {
+                errorBD("No se pudo actualizar el cliente.", ex);
                 return;
             }
-            cargarTabla(txtBuscar.getText().trim());
-            return;
         }
     }
 
@@ -171,16 +167,9 @@ public class FrmClientes extends JInternalFrame {
             return;
         }
         try {
-            boolean enVentas = false;
-            for (Venta v : db.getVentas()) {
-                if (v.getCliente() != null
-                        && v.getCliente().getNit().equalsIgnoreCase(c.getNit())) {
-                    enVentas = true;
-                    break;
-                }
-            }
-            if (enVentas || dao.tieneVentas(c.getNit())) {
-                aviso("No se puede eliminar a " + c.getNombre() + ": ya tiene ventas registradas.");
+            if (dao.tieneVentas(c.getNit())) {
+                aviso("No se puede eliminar a " + c.getNombre()
+                        + ": ya tiene ventas registradas.");
                 return;
             }
             int respuesta = JOptionPane.showConfirmDialog(this,
@@ -190,8 +179,8 @@ public class FrmClientes extends JInternalFrame {
                 dao.eliminar(c.getNit());
                 cargarTabla(txtBuscar.getText().trim());
             }
-        } catch (SQLException e) {
-            errorBD(e);
+        } catch (SQLException ex) {
+            errorBD("No se pudo eliminar el cliente.", ex);
         }
     }
 
@@ -210,23 +199,16 @@ public class FrmClientes extends JInternalFrame {
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION;
     }
 
-    /** nitOriginal es null cuando se trata de un cliente nuevo. */
-    private String validar(String nit, String nombre, String nitOriginal) {
+    /** nitOriginal es null en un alta; en una edición es el NIT que tenía el cliente. */
+    private String validar(String nit, String nombre, String nitOriginal) throws SQLException {
         if (nit.isEmpty()) {
             return "El NIT es obligatorio.";
         }
         if (nombre.isEmpty()) {
             return "El nombre es obligatorio.";
         }
-        boolean mismoNit = nitOriginal != null && nitOriginal.equalsIgnoreCase(nit);
-        if (!mismoNit) {
-            try {
-                if (dao.existeNit(nit)) {
-                    return "Ya existe un cliente con ese NIT.";
-                }
-            } catch (SQLException e) {
-                return "No se pudo verificar el NIT: " + e.getMessage();
-            }
+        if (dao.existeNit(nit, nitOriginal)) {
+            return "Ya existe un cliente con ese NIT.";
         }
         return null;
     }
@@ -244,9 +226,8 @@ public class FrmClientes extends JInternalFrame {
         JOptionPane.showMessageDialog(this, mensaje, "Aviso", JOptionPane.INFORMATION_MESSAGE);
     }
 
-    private void errorBD(SQLException e) {
-        JOptionPane.showMessageDialog(this,
-                "Error con la base de datos:\n" + e.getMessage(),
-                "Error", JOptionPane.ERROR_MESSAGE);
+    private void errorBD(String mensaje, SQLException ex) {
+        JOptionPane.showMessageDialog(this, mensaje + "\n" + ex.getMessage(),
+                "Error de base de datos", JOptionPane.ERROR_MESSAGE);
     }
 }
