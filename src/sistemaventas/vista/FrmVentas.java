@@ -4,6 +4,7 @@ import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.sql.SQLException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -24,7 +25,7 @@ import javax.swing.ListSelectionModel;
 import javax.swing.event.InternalFrameAdapter;
 import javax.swing.event.InternalFrameEvent;
 import javax.swing.table.DefaultTableModel;
-import sistemaventas.datos.BaseDatosMemoria;
+import sistemaventas.datos.VentaDAO;
 import sistemaventas.modelo.EstadoVenta;
 import sistemaventas.modelo.Producto;
 import sistemaventas.modelo.SeguimientoVenta;
@@ -33,10 +34,11 @@ import sistemaventas.modelo.Venta;
 /**
  * Consulta de ventas como ventana interna del MDI.
  * Busca, muestra el detalle con el historial de seguimiento y cambia el estado.
+ * Lee y guarda en MySQL a través de VentaDAO.
  */
 public class FrmVentas extends JInternalFrame {
 
-    private final BaseDatosMemoria db = BaseDatosMemoria.getInstancia();
+    private final VentaDAO dao = new VentaDAO();
     // Ventas que se ven ahora en la tabla (misma posición que las filas)
     private final List<Venta> mostradas = new ArrayList<>();
     private final SimpleDateFormat formatoFecha = new SimpleDateFormat("dd/MM/yyyy HH:mm");
@@ -129,7 +131,14 @@ public class FrmVentas extends JInternalFrame {
 
         modeloTabla.setRowCount(0);
         mostradas.clear();
-        for (Venta v : db.getVentas()) {
+        List<Venta> ventas;
+        try {
+            ventas = dao.listar();
+        } catch (SQLException ex) {
+            errorBD("No se pudieron cargar las ventas.", ex);
+            return;
+        }
+        for (Venta v : ventas) {
             if (!todosLosEstados && !v.getEstadoVenta().name().equals(estado)) {
                 continue;
             }
@@ -214,7 +223,12 @@ public class FrmVentas extends JInternalFrame {
             aviso("Solo se puede marcar como entregada una venta FACTURADA.\nEstado actual: " + v.getEstadoVenta());
             return;
         }
-        v.marcarEntregada();
+        try {
+            v.marcarEntregada();
+            dao.actualizarEstado(v, false);
+        } catch (SQLException ex) {
+            errorBD("No se pudo guardar el cambio de estado.", ex);
+        }
         cargarTabla();
     }
 
@@ -227,11 +241,21 @@ public class FrmVentas extends JInternalFrame {
             aviso("Esta venta ya no se puede cancelar.\nEstado actual: " + v.getEstadoVenta());
             return;
         }
-        int respuesta = JOptionPane.showConfirmDialog(this,
-                "¿Cancelar la venta " + v.getIdVenta() + "?",
+        // Se anota ANTES de cancelar: cancelarVenta() deja stockDescontado en false
+        boolean devolverStock = v.isStockDescontado();
+        String mensaje = "¿Cancelar la venta " + v.getIdVenta() + "?";
+        if (devolverStock) {
+            mensaje += "\nLas unidades se devolverán al inventario.";
+        }
+        int respuesta = JOptionPane.showConfirmDialog(this, mensaje,
                 "Cancelar venta", JOptionPane.YES_NO_OPTION);
         if (respuesta == JOptionPane.YES_OPTION) {
-            v.cancelarVenta();
+            try {
+                v.cancelarVenta();
+                dao.actualizarEstado(v, devolverStock);
+            } catch (SQLException ex) {
+                errorBD("No se pudo cancelar la venta. El inventario no se modificó.", ex);
+            }
             cargarTabla();
         }
     }
@@ -243,6 +267,11 @@ public class FrmVentas extends JInternalFrame {
             return null;
         }
         return mostradas.get(fila);
+    }
+
+    private void errorBD(String mensaje, SQLException ex) {
+        JOptionPane.showMessageDialog(this, mensaje + "\n" + ex.getMessage(),
+                "Error de base de datos", JOptionPane.ERROR_MESSAGE);
     }
 
     private void aviso(String mensaje) {

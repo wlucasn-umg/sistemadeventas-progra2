@@ -5,6 +5,7 @@ import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -22,7 +23,10 @@ import javax.swing.JTextField;
 import javax.swing.event.InternalFrameAdapter;
 import javax.swing.event.InternalFrameEvent;
 import javax.swing.table.DefaultTableModel;
-import sistemaventas.datos.BaseDatosMemoria;
+import sistemaventas.datos.ClienteDAO;
+import sistemaventas.datos.ProductoDAO;
+import sistemaventas.datos.VendedorDAO;
+import sistemaventas.datos.VentaDAO;
 import sistemaventas.modelo.Cliente;
 import sistemaventas.modelo.MetodoPago;
 import sistemaventas.modelo.Producto;
@@ -31,14 +35,23 @@ import sistemaventas.modelo.Venta;
 
 /**
  * Formulario de facturación como ventana interna del MDI.
- * Lee y escribe siempre en BaseDatosMemoria (Singleton).
+ * Clientes, vendedores y productos salen de MySQL; la venta se guarda ya facturada
+ * en una sola transacción (VentaDAO), que también descuenta el stock.
  */
 public class FrmFacturacion extends JInternalFrame {
 
     private static final double TASA_IVA = 0.12;
     private static final String NOMBRE_EMPRESA = "Mi Tienda Guatemala";
 
-    private final BaseDatosMemoria db = BaseDatosMemoria.getInstancia();
+    private final ClienteDAO clienteDAO = new ClienteDAO();
+    private final VendedorDAO vendedorDAO = new VendedorDAO();
+    private final ProductoDAO productoDAO = new ProductoDAO();
+    private final VentaDAO ventaDAO = new VentaDAO();
+
+    // Listas leídas de MySQL (misma posición que los combos)
+    private List<Cliente> clientes = new ArrayList<>();
+    private List<Vendedor> vendedores = new ArrayList<>();
+    private List<Producto> productos = new ArrayList<>();
     private final ArrayList<Producto> productosAgregados = new ArrayList<>();
 
     private final JComboBox<String> cbCliente = new JComboBox<>();
@@ -134,24 +147,34 @@ public class FrmFacturacion extends JInternalFrame {
         panel.add(campo, g);
     }
 
+    /** Lee clientes, vendedores y productos de MySQL y rellena los combos. */
     private void llenarCombos() {
-        List<String> clientes = new ArrayList<>();
-        for (Cliente c : db.getClientes()) {
-            clientes.add(c.getNombre());
+        try {
+            clientes = clienteDAO.listar();
+            vendedores = vendedorDAO.listar();
+            productos = productoDAO.listar();
+        } catch (SQLException ex) {
+            errorBD("No se pudieron cargar clientes, vendedores y productos.", ex);
+            return;
         }
-        recargar(cbCliente, clientes);
 
-        List<String> vendedores = new ArrayList<>();
-        for (Vendedor v : db.getVendedores()) {
-            vendedores.add(v.getNombre());
+        List<String> nombres = new ArrayList<>();
+        for (Cliente c : clientes) {
+            nombres.add(c.getNombre());
         }
-        recargar(cbVendedor, vendedores);
+        recargar(cbCliente, nombres);
 
-        List<String> productos = new ArrayList<>();
-        for (Producto p : db.getInventario().getProductos()) {
-            productos.add(p.getNombreProducto());
+        nombres = new ArrayList<>();
+        for (Vendedor v : vendedores) {
+            nombres.add(v.getNombre());
         }
-        recargar(cbProducto, productos);
+        recargar(cbVendedor, nombres);
+
+        nombres = new ArrayList<>();
+        for (Producto p : productos) {
+            nombres.add(p.getNombreProducto());
+        }
+        recargar(cbProducto, nombres);
     }
 
     private void recargar(JComboBox<String> combo, List<String> nombres) {
@@ -166,13 +189,12 @@ public class FrmFacturacion extends JInternalFrame {
     }
 
     private void agregarProducto() {
-        List<Producto> inventario = db.getInventario().getProductos();
-        if (inventario.isEmpty()) {
+        if (productos.isEmpty()) {
             aviso("No hay productos registrados todavía.");
             return;
         }
         int idx = cbProducto.getSelectedIndex();
-        if (idx < 0 || idx >= inventario.size()) {
+        if (idx < 0 || idx >= productos.size()) {
             aviso("Selecciona un producto.");
             return;
         }
@@ -187,7 +209,21 @@ public class FrmFacturacion extends JInternalFrame {
             return;
         }
 
-        Producto p = inventario.get(idx);
+        Producto p = productos.get(idx);
+        // Revisa el stock contando lo que ya llevas de ese mismo producto
+        int yaAgregadas = 0;
+        for (Producto x : productosAgregados) {
+            if (x.getIdProducto().equals(p.getIdProducto())) {
+                yaAgregadas++;
+            }
+        }
+        int disponibles = p.getStock() - yaAgregadas;
+        if (cantidad > disponibles) {
+            aviso("Stock insuficiente de " + p.getNombreProducto()
+                    + ". Disponible: " + Math.max(disponibles, 0) + ".");
+            return;
+        }
+
         for (int i = 0; i < cantidad; i++) {
             productosAgregados.add(p);
         }
@@ -209,13 +245,13 @@ public class FrmFacturacion extends JInternalFrame {
     }
 
     private void generarFactura() {
-        if (db.getClientes().isEmpty() || db.getVendedores().isEmpty()) {
+        if (clientes.isEmpty() || vendedores.isEmpty()) {
             aviso("Faltan clientes o vendedores registrados.");
             return;
         }
         int idxC = cbCliente.getSelectedIndex();
         int idxV = cbVendedor.getSelectedIndex();
-        if (idxC < 0 || idxV < 0) {
+        if (idxC < 0 || idxV < 0 || idxC >= clientes.size() || idxV >= vendedores.size()) {
             aviso("Selecciona cliente y vendedor.");
             return;
         }
@@ -224,42 +260,40 @@ public class FrmFacturacion extends JInternalFrame {
             return;
         }
 
-        Cliente cliente = db.getClientes().get(idxC);
-        Vendedor vendedor = db.getVendedores().get(idxV);
+        Cliente cliente = clientes.get(idxC);
+        Vendedor vendedor = vendedores.get(idxV);
         MetodoPago metodoPago = (MetodoPago) cbMetodoPago.getSelectedItem();
 
-        String idVenta = siguienteIdVenta();
-        Venta venta = new Venta(idVenta, vendedor.getUsuario().getNombreUsuario(),
-                metodoPago, vendedor, cliente);
-        for (Producto p : productosAgregados) {
-            venta.agregarProducto(p);
-        }
-        venta.registrarVenta();
-        venta.generarFactura("F-" + idVenta, NOMBRE_EMPRESA);
-        db.getVentas().add(venta);
-
-        JOptionPane.showMessageDialog(this,
-                "Factura F-" + idVenta + " generada.\nTotal con IVA: Q"
-                + String.format(Locale.US, "%.2f", venta.getFactura().getTotal()),
-                "Factura generada", JOptionPane.INFORMATION_MESSAGE);
-        limpiarPantalla();
-    }
-
-    private String siguienteIdVenta() {
-        int n = db.getVentas().size() + 1;
-        while (existeVenta("V" + n)) {
-            n++;
-        }
-        return "V" + n;
-    }
-
-    private boolean existeVenta(String id) {
-        for (Venta v : db.getVentas()) {
-            if (v.getIdVenta().equals(id)) {
-                return true;
+        try {
+            int numero = ventaDAO.siguienteId();
+            String idVenta = "V" + numero;
+            Venta venta = new Venta(idVenta, vendedor.getUsuario().getNombreUsuario(),
+                    metodoPago, vendedor, cliente);
+            for (Producto p : productosAgregados) {
+                if (!venta.agregarProducto(p)) {
+                    aviso("Stock insuficiente de " + p.getNombreProducto() + ".");
+                    return;
+                }
             }
+            venta.registrarVenta();
+            venta.generarFactura("F-" + idVenta, NOMBRE_EMPRESA);
+            if (venta.getFactura() == null) {
+                aviso("No se pudo generar la factura. Revisa el stock de los productos.");
+                return;
+            }
+
+            // Guarda venta, factura, detalle, historial y descuenta el stock en MySQL
+            ventaDAO.guardarFacturada(venta, numero);
+
+            JOptionPane.showMessageDialog(this,
+                    "Factura F-" + idVenta + " generada.\nTotal con IVA: Q"
+                    + String.format(Locale.US, "%.2f", venta.getFactura().getTotal()),
+                    "Factura generada", JOptionPane.INFORMATION_MESSAGE);
+            limpiarPantalla();
+            llenarCombos(); // el stock cambió: se vuelve a leer de MySQL
+        } catch (SQLException ex) {
+            errorBD("No se pudo guardar la venta. No se descontó stock.", ex);
         }
-        return false;
     }
 
     private void limpiarPantalla() {
@@ -273,5 +307,10 @@ public class FrmFacturacion extends JInternalFrame {
 
     private void aviso(String mensaje) {
         JOptionPane.showMessageDialog(this, mensaje, "Aviso", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void errorBD(String mensaje, SQLException ex) {
+        JOptionPane.showMessageDialog(this, mensaje + "\n" + ex.getMessage(),
+                "Error de base de datos", JOptionPane.ERROR_MESSAGE);
     }
 }

@@ -31,6 +31,22 @@ public class Venta {
         cambiarEstado(EstadoVenta.PENDIENTE, "Venta creada");
     }
 
+    // Para reconstruir una venta guardada en la base de datos (no agrega historial: se carga aparte)
+    public Venta(String idVenta, Date fechaVenta, String usuarioEmision, MetodoPago metodoPago,
+                 EstadoVenta estadoVenta, boolean stockDescontado, Vendedor vendedor, Cliente cliente) {
+        this.idVenta = idVenta;
+        this.fechaVenta = fechaVenta;
+        this.usuarioEmision = usuarioEmision;
+        this.metodoPago = metodoPago;
+        this.estadoVenta = estadoVenta;
+        this.stockDescontado = stockDescontado;
+        this.vendedor = vendedor;
+        this.cliente = cliente;
+        this.productos = new ArrayList<>();
+        this.historial = new ArrayList<>();
+        this.total = 0;
+    }
+
     public String getIdVenta() {
         return idVenta;
     }
@@ -69,6 +85,14 @@ public class Venta {
 
     public Factura getFactura() {
         return factura;
+    }
+
+    public void setFactura(Factura factura) {
+        this.factura = factura;
+    }
+
+    public boolean isStockDescontado() {
+        return stockDescontado;
     }
 
     public ArrayList<SeguimientoVenta> getHistorial() {

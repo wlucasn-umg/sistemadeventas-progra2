@@ -15,6 +15,16 @@ public class SeguimientoVenta {
         this.comentario = comentario;
     }
 
+    // Para reconstruir un seguimiento guardado en la base de datos,
+    // conservando su fecha original
+    public SeguimientoVenta(String idSeguimiento, EstadoVenta estado,
+            Date fechaHora, String comentario) {
+        this.idSeguimiento = idSeguimiento;
+        this.estado = estado;
+        this.fechaHora = fechaHora;
+        this.comentario = comentario;
+    }
+
     public String getIdSeguimiento() {
         return idSeguimiento;
     }

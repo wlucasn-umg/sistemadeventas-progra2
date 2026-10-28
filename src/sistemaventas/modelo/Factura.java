@@ -23,6 +23,18 @@ public class Factura {
         return idFactura;
     }
 
+    public String getNombreEmpresa() {
+        return nombreEmpresa;
+    }
+
+    public double getSubtotal() {
+        return subtotal;
+    }
+
+    public double getIva() {
+        return iva;
+    }
+
     public double getTotal() {
         return total;
     }
