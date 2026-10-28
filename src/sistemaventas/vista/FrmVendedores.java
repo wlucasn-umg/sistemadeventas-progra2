@@ -3,6 +3,7 @@ package sistemaventas.vista;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.BorderFactory;
@@ -20,15 +21,18 @@ import javax.swing.event.InternalFrameAdapter;
 import javax.swing.event.InternalFrameEvent;
 import javax.swing.table.DefaultTableModel;
 import sistemaventas.datos.BaseDatosMemoria;
+import sistemaventas.datos.VendedorDAO;
 import sistemaventas.modelo.Vendedor;
 import sistemaventas.modelo.Venta;
 
 /**
  * Catálogo de vendedores como ventana interna del MDI.
- * Altas, cambios, bajas y búsqueda sobre BaseDatosMemoria.
+ * Altas, cambios, bajas y búsqueda sobre la base de datos MySQL (VendedorDAO).
  */
 public class FrmVendedores extends JInternalFrame {
 
+    private final VendedorDAO dao = new VendedorDAO();
+    // Las ventas aún viven en memoria; se usan para no borrar vendedores con ventas
     private final BaseDatosMemoria db = BaseDatosMemoria.getInstancia();
     // Vendedores que se ven ahora en la tabla (misma posición que las filas)
     private final List<Vendedor> mostrados = new ArrayList<>();
@@ -96,19 +100,16 @@ public class FrmVendedores extends JInternalFrame {
     private void cargarTabla(String filtro) {
         modeloTabla.setRowCount(0);
         mostrados.clear();
-        String f = filtro.toLowerCase();
-        for (Vendedor v : db.getVendedores()) {
-            String usuario = v.getUsuario().getNombreUsuario();
-            boolean coincide = f.isEmpty()
-                    || v.getIdVendedor().toLowerCase().contains(f)
-                    || v.getNombre().toLowerCase().contains(f)
-                    || v.getPuesto().toLowerCase().contains(f)
-                    || usuario.toLowerCase().contains(f);
-            if (coincide) {
+        try {
+            List<Vendedor> lista = filtro.isEmpty() ? dao.listar() : dao.buscar(filtro);
+            for (Vendedor v : lista) {
                 mostrados.add(v);
                 modeloTabla.addRow(new Object[]{
-                    v.getIdVendedor(), v.getNombre(), v.getTelefono(), v.getPuesto(), usuario});
+                    v.getIdVendedor(), v.getNombre(), v.getTelefono(), v.getPuesto(),
+                    v.getUsuario().getNombreUsuario()});
             }
+        } catch (SQLException e) {
+            errorBD(e);
         }
     }
 
@@ -128,8 +129,14 @@ public class FrmVendedores extends JInternalFrame {
                 aviso(error);
                 continue; // vuelve a mostrar el formulario con lo que ya escribiste
             }
-            db.getVendedores().add(new Vendedor(nombre.getText().trim(), telefono.getText().trim(),
-                    id.getText().trim(), puesto.getText().trim(), usuario.getText().trim(), claveTexto));
+            try {
+                dao.insertar(new Vendedor(nombre.getText().trim(), telefono.getText().trim(),
+                        id.getText().trim(), puesto.getText().trim(), usuario.getText().trim(),
+                        claveTexto), claveTexto);
+            } catch (SQLException e) {
+                errorBD(e);
+                return;
+            }
             cargarTabla(txtBuscar.getText().trim());
             return;
         }
@@ -140,6 +147,7 @@ public class FrmVendedores extends JInternalFrame {
         if (v == null) {
             return;
         }
+        String idOriginal = v.getIdVendedor();
         JTextField id = new JTextField(v.getIdVendedor(), 20);
         JTextField nombre = new JTextField(v.getNombre(), 20);
         JTextField telefono = new JTextField(v.getTelefono(), 20);
@@ -150,18 +158,18 @@ public class FrmVendedores extends JInternalFrame {
         while (pedirDatos("Editar vendedor", true, id, nombre, telefono, puesto, usuario, clave)) {
             String claveTexto = new String(clave.getPassword());
             String error = validar(id.getText().trim(), nombre.getText().trim(),
-                    usuario.getText().trim(), claveTexto, v);
+                    usuario.getText().trim(), claveTexto, idOriginal);
             if (error != null) {
                 aviso(error);
                 continue;
             }
-            v.setIdVendedor(id.getText().trim());
-            v.setNombre(nombre.getText().trim());
-            v.setTelefono(telefono.getText().trim());
-            v.setPuesto(puesto.getText().trim());
-            v.getUsuario().setNombreUsuario(usuario.getText().trim());
-            if (!claveTexto.isEmpty()) {
-                v.getUsuario().setContraUsuario(claveTexto);
+            try {
+                dao.actualizar(idOriginal, new Vendedor(nombre.getText().trim(),
+                        telefono.getText().trim(), id.getText().trim(), puesto.getText().trim(),
+                        usuario.getText().trim(), claveTexto), claveTexto);
+            } catch (SQLException e) {
+                errorBD(e);
+                return;
             }
             cargarTabla(txtBuscar.getText().trim());
             return;
@@ -173,23 +181,27 @@ public class FrmVendedores extends JInternalFrame {
         if (v == null) {
             return;
         }
-        int ventas = 0;
-        for (Venta venta : db.getVentas()) {
-            if (venta.getVendedor() == v) {
-                ventas++;
+        try {
+            int ventas = 0;
+            for (Venta venta : db.getVentas()) {
+                if (venta.getVendedor() != null
+                        && venta.getVendedor().getIdVendedor().equalsIgnoreCase(v.getIdVendedor())) {
+                    ventas++;
+                }
             }
-        }
-        if (ventas > 0) {
-            aviso("No se puede eliminar a " + v.getNombre() + ": tiene "
-                    + ventas + " venta(s) registrada(s).");
-            return;
-        }
-        int respuesta = JOptionPane.showConfirmDialog(this,
-                "¿Eliminar al vendedor " + v.getNombre() + " (ID " + v.getIdVendedor() + ")?",
-                "Eliminar vendedor", JOptionPane.YES_NO_OPTION);
-        if (respuesta == JOptionPane.YES_OPTION) {
-            db.getVendedores().remove(v);
-            cargarTabla(txtBuscar.getText().trim());
+            if (ventas > 0 || dao.tieneVentas(v.getIdVendedor())) {
+                aviso("No se puede eliminar a " + v.getNombre() + ": ya tiene ventas registradas.");
+                return;
+            }
+            int respuesta = JOptionPane.showConfirmDialog(this,
+                    "¿Eliminar al vendedor " + v.getNombre() + " (ID " + v.getIdVendedor() + ")?",
+                    "Eliminar vendedor", JOptionPane.YES_NO_OPTION);
+            if (respuesta == JOptionPane.YES_OPTION) {
+                dao.eliminar(v.getIdVendedor());
+                cargarTabla(txtBuscar.getText().trim());
+            }
+        } catch (SQLException e) {
+            errorBD(e);
         }
     }
 
@@ -212,7 +224,8 @@ public class FrmVendedores extends JInternalFrame {
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION;
     }
 
-    private String validar(String id, String nombre, String usuario, String clave, Vendedor actual) {
+    /** idOriginal es null cuando se trata de un vendedor nuevo. */
+    private String validar(String id, String nombre, String usuario, String clave, String idOriginal) {
         if (id.isEmpty()) {
             return "El ID es obligatorio.";
         }
@@ -222,19 +235,19 @@ public class FrmVendedores extends JInternalFrame {
         if (usuario.isEmpty()) {
             return "El nombre de usuario es obligatorio.";
         }
-        if (actual == null && clave.isEmpty()) {
+        if (idOriginal == null && clave.isEmpty()) {
             return "La contraseña es obligatoria.";
         }
-        for (Vendedor otro : db.getVendedores()) {
-            if (otro == actual) {
-                continue;
-            }
-            if (otro.getIdVendedor().equalsIgnoreCase(id)) {
+        try {
+            boolean mismoId = idOriginal != null && idOriginal.equalsIgnoreCase(id);
+            if (!mismoId && dao.existeCodigo(id)) {
                 return "Ya existe un vendedor con ese ID.";
             }
-            if (otro.getUsuario().getNombreUsuario().equalsIgnoreCase(usuario)) {
+            if (dao.existeUsuario(usuario, idOriginal == null ? "" : idOriginal)) {
                 return "Ese nombre de usuario ya está en uso.";
             }
+        } catch (SQLException e) {
+            return "No se pudo verificar en la base de datos: " + e.getMessage();
         }
         return null;
     }
@@ -250,5 +263,11 @@ public class FrmVendedores extends JInternalFrame {
 
     private void aviso(String mensaje) {
         JOptionPane.showMessageDialog(this, mensaje, "Aviso", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void errorBD(SQLException e) {
+        JOptionPane.showMessageDialog(this,
+                "Error con la base de datos:\n" + e.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
     }
 }
