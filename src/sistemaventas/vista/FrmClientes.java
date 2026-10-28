@@ -3,6 +3,7 @@ package sistemaventas.vista;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.BorderFactory;
@@ -19,14 +20,18 @@ import javax.swing.event.InternalFrameAdapter;
 import javax.swing.event.InternalFrameEvent;
 import javax.swing.table.DefaultTableModel;
 import sistemaventas.datos.BaseDatosMemoria;
+import sistemaventas.datos.ClienteDAO;
 import sistemaventas.modelo.Cliente;
+import sistemaventas.modelo.Venta;
 
 /**
  * Catálogo de clientes como ventana interna del MDI.
- * Altas, cambios, bajas y búsqueda sobre BaseDatosMemoria.
+ * Altas, cambios, bajas y búsqueda sobre la base de datos MySQL (ClienteDAO).
  */
 public class FrmClientes extends JInternalFrame {
 
+    private final ClienteDAO dao = new ClienteDAO();
+    // Las ventas aún viven en memoria; se usan para no borrar clientes con ventas
     private final BaseDatosMemoria db = BaseDatosMemoria.getInstancia();
     // Clientes que se ven ahora en la tabla (misma posición que las filas)
     private final List<Cliente> mostrados = new ArrayList<>();
@@ -94,16 +99,15 @@ public class FrmClientes extends JInternalFrame {
     private void cargarTabla(String filtro) {
         modeloTabla.setRowCount(0);
         mostrados.clear();
-        String f = filtro.toLowerCase();
-        for (Cliente c : db.getClientes()) {
-            boolean coincide = f.isEmpty()
-                    || c.getNit().toLowerCase().contains(f)
-                    || c.getNombre().toLowerCase().contains(f);
-            if (coincide) {
+        try {
+            List<Cliente> lista = filtro.isEmpty() ? dao.listar() : dao.buscar(filtro);
+            for (Cliente c : lista) {
                 mostrados.add(c);
                 modeloTabla.addRow(new Object[]{
                     c.getNit(), c.getNombre(), c.getTelefono(), c.getDireccionEnvio()});
             }
+        } catch (SQLException e) {
+            errorBD(e);
         }
     }
 
@@ -119,8 +123,13 @@ public class FrmClientes extends JInternalFrame {
                 aviso(error);
                 continue; // vuelve a mostrar el formulario con lo que ya escribiste
             }
-            db.getClientes().add(new Cliente(nombre.getText().trim(), telefono.getText().trim(),
-                    nit.getText().trim(), direccion.getText().trim()));
+            try {
+                dao.insertar(new Cliente(nombre.getText().trim(), telefono.getText().trim(),
+                        nit.getText().trim(), direccion.getText().trim()));
+            } catch (SQLException e) {
+                errorBD(e);
+                return;
+            }
             cargarTabla(txtBuscar.getText().trim());
             return;
         }
@@ -131,21 +140,26 @@ public class FrmClientes extends JInternalFrame {
         if (c == null) {
             return;
         }
+        String nitOriginal = c.getNit();
         JTextField nit = new JTextField(c.getNit(), 20);
         JTextField nombre = new JTextField(c.getNombre(), 20);
         JTextField telefono = new JTextField(c.getTelefono(), 20);
         JTextField direccion = new JTextField(c.getDireccionEnvio(), 20);
 
         while (pedirDatos("Editar cliente", nit, nombre, telefono, direccion)) {
-            String error = validar(nit.getText().trim(), nombre.getText().trim(), c);
+            String error = validar(nit.getText().trim(), nombre.getText().trim(), nitOriginal);
             if (error != null) {
                 aviso(error);
                 continue;
             }
-            c.setNit(nit.getText().trim());
-            c.setNombre(nombre.getText().trim());
-            c.setTelefono(telefono.getText().trim());
-            c.setDireccionEnvio(direccion.getText().trim());
+            try {
+                dao.actualizar(nitOriginal, new Cliente(nombre.getText().trim(),
+                        telefono.getText().trim(), nit.getText().trim(),
+                        direccion.getText().trim()));
+            } catch (SQLException e) {
+                errorBD(e);
+                return;
+            }
             cargarTabla(txtBuscar.getText().trim());
             return;
         }
@@ -156,12 +170,28 @@ public class FrmClientes extends JInternalFrame {
         if (c == null) {
             return;
         }
-        int respuesta = JOptionPane.showConfirmDialog(this,
-                "¿Eliminar al cliente " + c.getNombre() + " (NIT " + c.getNit() + ")?",
-                "Eliminar cliente", JOptionPane.YES_NO_OPTION);
-        if (respuesta == JOptionPane.YES_OPTION) {
-            db.getClientes().remove(c);
-            cargarTabla(txtBuscar.getText().trim());
+        try {
+            boolean enVentas = false;
+            for (Venta v : db.getVentas()) {
+                if (v.getCliente() != null
+                        && v.getCliente().getNit().equalsIgnoreCase(c.getNit())) {
+                    enVentas = true;
+                    break;
+                }
+            }
+            if (enVentas || dao.tieneVentas(c.getNit())) {
+                aviso("No se puede eliminar a " + c.getNombre() + ": ya tiene ventas registradas.");
+                return;
+            }
+            int respuesta = JOptionPane.showConfirmDialog(this,
+                    "¿Eliminar al cliente " + c.getNombre() + " (NIT " + c.getNit() + ")?",
+                    "Eliminar cliente", JOptionPane.YES_NO_OPTION);
+            if (respuesta == JOptionPane.YES_OPTION) {
+                dao.eliminar(c.getNit());
+                cargarTabla(txtBuscar.getText().trim());
+            }
+        } catch (SQLException e) {
+            errorBD(e);
         }
     }
 
@@ -180,16 +210,22 @@ public class FrmClientes extends JInternalFrame {
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION;
     }
 
-    private String validar(String nit, String nombre, Cliente actual) {
+    /** nitOriginal es null cuando se trata de un cliente nuevo. */
+    private String validar(String nit, String nombre, String nitOriginal) {
         if (nit.isEmpty()) {
             return "El NIT es obligatorio.";
         }
         if (nombre.isEmpty()) {
             return "El nombre es obligatorio.";
         }
-        for (Cliente otro : db.getClientes()) {
-            if (otro != actual && otro.getNit().equalsIgnoreCase(nit)) {
-                return "Ya existe un cliente con ese NIT.";
+        boolean mismoNit = nitOriginal != null && nitOriginal.equalsIgnoreCase(nit);
+        if (!mismoNit) {
+            try {
+                if (dao.existeNit(nit)) {
+                    return "Ya existe un cliente con ese NIT.";
+                }
+            } catch (SQLException e) {
+                return "No se pudo verificar el NIT: " + e.getMessage();
             }
         }
         return null;
@@ -206,5 +242,11 @@ public class FrmClientes extends JInternalFrame {
 
     private void aviso(String mensaje) {
         JOptionPane.showMessageDialog(this, mensaje, "Aviso", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void errorBD(SQLException e) {
+        JOptionPane.showMessageDialog(this,
+                "Error con la base de datos:\n" + e.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
     }
 }
